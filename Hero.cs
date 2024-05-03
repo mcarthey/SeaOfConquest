@@ -10,6 +10,7 @@ namespace SeaOfConquest
     {
         public string Name { get; set; }
         public List<string> PreferredPositions { get; set; }
+        public List<string> PreferredPartners { get; set; }
         public List<string> PreferredShips { get; set; }
         public List<string> PreferredTrinkets { get; set; }
 
@@ -17,6 +18,7 @@ namespace SeaOfConquest
         {
             Name = name;
             PreferredPositions = new List<string>();
+            PreferredPartners = new List<string>();
             PreferredShips = new List<string>();
             PreferredTrinkets = new List<string>();
         }

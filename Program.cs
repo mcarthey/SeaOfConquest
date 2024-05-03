@@ -7,6 +7,8 @@ internal class Program
     {
         var heroes = ReadHeroes("heroes.csv");
         var ships = GetDistinctShips(heroes);
+        //ships = SelectSubsetOfShips(ships);
+
         var positions = new List<string> { "Captain", "First Mate", "Gunner" };
 
         var model = new CpModel();
@@ -25,6 +27,21 @@ internal class Program
         SolveModel(model, assignments);
     }
 
+    private static List<string> SelectSubsetOfShips(List<string> allShips)
+    {
+        // Define the subset of ships you want to focus on
+        var selectedShips = new List<string> { "Flagship", "Fearless Princess", "Warhammer", "Stormbringer" };  // Example subset
+
+        // Filter the list of ships to include only the selected ones
+        var shipsToConsider = allShips.Where(ship => selectedShips.Contains(ship)).ToList();
+
+        return shipsToConsider;
+    }
+
+    /// <summary>
+    /// Adds constraints to the model to ensure each hero is assigned to exactly one position on one ship
+    /// and each position on each ship is filled by exactly one hero.
+    /// </summary>
     private static void AddConstraints(CpModel model, List<Hero> heroes, List<string> ships, List<string> positions, Dictionary<string, IntVar> assignments)
     {
         // Each hero is assigned to at most one position on at most one ship
@@ -60,7 +77,9 @@ internal class Program
     }
 
 
-
+    /// <summary>
+    /// Creates binary variables for each hero, ship, and position combination.
+    /// </summary>
     private static Dictionary<string, IntVar> CreateAssignmentVariables(CpModel model, List<Hero> heroes, List<string> ships, List<string> positions)
     {
         var assignments = new Dictionary<string, IntVar>();
@@ -78,14 +97,26 @@ internal class Program
         return assignments;
     }
 
+    /// <summary>
+    /// Extracts a distinct list of ships from the heroes' preferences.
+    /// </summary>
     private static List<string> GetDistinctShips(List<Hero> heroes)
     {
         return heroes.SelectMany(hero => hero.PreferredShips).Distinct().ToList();
     }
 
+    /// <summary>
+    /// Initializes and returns the total score variable based on the assignments.
+    /// The total score is calculated by assigning scores to preferred assignments.
+    /// </summary>
     private static IntVar InitializeTotalScore(CpModel model, Dictionary<string, IntVar> assignments, List<Hero> heroes, List<string> ships, List<string> positions)
     {
-        var totalScore = model.NewIntVar(0, 100000, "totalScore");
+        // Define the range of the total score based on potential maximum points
+        int maxScore = heroes.Count * 10;  // Assuming a max score of 10 per hero for their preferred assignment
+        var totalScore = model.NewIntVar(0, maxScore, "totalScore");
+
+        // Use a more straightforward approach to calculate the total score
+        List<IntVar> scoredComponents = new List<IntVar>();
         foreach (var hero in heroes)
         {
             foreach (var ship in hero.PreferredShips)
@@ -95,16 +126,20 @@ internal class Program
                     if (hero.PreferredPositions.Contains(position))
                     {
                         var varName = $"{hero.Name}_{ship}_{position}";
-                        var preferenceScore = CalculatePreferenceScore(hero, ship, position);
+                        // Calculate the preference score for each assignment
+                        int preferenceScore = CalculatePreferenceScore(hero, ship, position);
 
-                        Console.WriteLine($"Adding score constraint for {varName} with score {preferenceScore}");
-
-                        // Consider using soft constraints or adjusting how these are applied
-                        model.Add(totalScore >= assignments[varName] * preferenceScore);
+                        // Create an intermediate variable for score contribution, scaled by preference
+                        var scoreContribution = model.NewIntVar(0, preferenceScore, $"scoreContrib_{varName}");
+                        model.Add(scoreContribution == assignments[varName] * preferenceScore);
+                        scoredComponents.Add(scoreContribution);
                     }
                 }
             }
         }
+
+        // Sum all contributions to get the total score
+        model.Add(LinearExpr.Sum(scoredComponents) == totalScore);
 
         return totalScore;
     }
@@ -133,10 +168,18 @@ internal class Program
             {
                 var line = reader.ReadLine();
                 var values = line.Split(',');
+                if (values.Length < 5) // Ensure there are enough columns
+                {
+                    Console.WriteLine("Warning: Line format incorrect, skipping line.");
+                    continue;
+                }
+
                 var hero = new Hero(values[0])
                 {
                     PreferredPositions = values[1].Split('|').ToList(),
-                    PreferredShips = values[2].Split('|').ToList()
+                    PreferredPartners = values[2].Split('|').ToList(),
+                    PreferredShips = values[3].Split('|').ToList(),
+                    PreferredTrinkets = values[4].Split('|').ToList()
                 };
                 heroes.Add(hero);
             }
@@ -144,28 +187,61 @@ internal class Program
 
         return heroes;
     }
-
     private static void SolveModel(CpModel model, Dictionary<string, IntVar> assignments)
     {
-        CpSolver solver = new CpSolver();
-        solver.StringParameters = "num_search_workers:4, log_search_progress:true";  // Enable logging
-        CpSolverStatus status = solver.Solve(model);
-        Console.WriteLine("Solver status: " + status);
-
+        var solver = new CpSolver();
+        var status = solver.Solve(model);
 
         if (status == CpSolverStatus.Optimal || status == CpSolverStatus.Feasible)
         {
             Console.WriteLine("Solution Found:");
             bool anyAssigned = false;
+
+            // Dictionary to group assignments by ship for clearer output
+            var assignmentsByShip = new Dictionary<string, List<string>>();
+
             foreach (var kvp in assignments)
             {
                 if (solver.Value(kvp.Value) == 1)
                 {
-                    Console.WriteLine($"{kvp.Key} assigned.");
+                    var parts = kvp.Key.Split('_');
+                    if (parts.Length != 3)
+                    {
+                        Console.WriteLine("Error: Assignment variable name format is incorrect.");
+                        continue;
+                    }
+
+                    var hero = parts[0];
+                    var ship = parts[1];
+                    var position = parts[2];
+
+                    // Prepare the assignment description
+                    string assignmentDescription = $"Hero {hero} is assigned to {position}.";
+
+                    // Group by ship
+                    if (!assignmentsByShip.ContainsKey(ship))
+                    {
+                        assignmentsByShip[ship] = new List<string>();
+                    }
+                    assignmentsByShip[ship].Add(assignmentDescription);
+
                     anyAssigned = true;
                 }
             }
-            if (!anyAssigned)
+
+            // Print grouped by ships
+            if (anyAssigned)
+            {
+                foreach (var ship in assignmentsByShip.Keys)
+                {
+                    Console.WriteLine($"\nAssignments for ship {ship}:");
+                    foreach (var desc in assignmentsByShip[ship])
+                    {
+                        Console.WriteLine(desc);
+                    }
+                }
+            }
+            else
             {
                 Console.WriteLine("No variables were assigned true.");
             }
@@ -173,8 +249,9 @@ internal class Program
         else
         {
             Console.WriteLine("No solution found.");
+            // Additional debug information
+            Console.WriteLine("Model status: " + status);
         }
     }
-
 
 }
