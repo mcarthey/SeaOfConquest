@@ -6,6 +6,8 @@ internal class Program
     public static void Main(string[] args)
     {
         var heroes = ReadHeroes("heroes.csv");
+        //heroes = SelectSubsetOfHeroes(heroes);
+
         var ships = GetDistinctShips(heroes);
         //ships = SelectSubsetOfShips(ships);
 
@@ -17,20 +19,94 @@ internal class Program
         // Use this for simplified testing
         //var totalScore = InitializeTotalScoreSimplified(model, assignments);
 
+        var shipActiveVars = CreateShipActiveVariables(model, ships);
+
+        // Add constraints to limit the number of active ships and manage hero assignments per ship
+        AddShipAndHeroConstraints(model, assignments, shipActiveVars, ships, positions);
+
+        // Ensure each hero is used at most once across all ships and positions
+        AddHeroAssignmentConstraints(model, assignments, heroes, ships, positions);
+
         var totalScore = InitializeTotalScore(model, assignments, heroes, ships, positions);
 
         // Add constraints
-        AddConstraints(model, heroes, ships, positions, assignments);
+        //AddConstraints(model, heroes, ships, positions, assignments);
 
         model.Maximize(totalScore);
 
         SolveModel(model, assignments);
     }
 
+    private static Dictionary<string, BoolVar> CreateShipActiveVariables(CpModel model, List<string> ships)
+    {
+        var shipActiveVars = new Dictionary<string, BoolVar>();
+        foreach (var ship in ships)
+        {
+            shipActiveVars[ship] = model.NewBoolVar($"active_{ship}");
+        }
+        return shipActiveVars;
+    }
+
+    private static void AddShipAndHeroConstraints(CpModel model, Dictionary<string, IntVar> assignments, Dictionary<string, BoolVar> shipActiveVars, List<string> ships, List<string> positions)
+    {
+        // Continue to limit the number of active ships to 4
+        model.Add(LinearExpr.Sum(shipActiveVars.Values) == 4);
+
+        foreach (var ship in ships)
+        {
+            var shipAssignments = new List<IntVar>();
+            foreach (var position in positions)
+            {
+                foreach (var assignment in assignments)
+                {
+                    if (assignment.Key.Contains($"{ship}_{position}"))
+                    {
+                        shipAssignments.Add(assignment.Value);
+                    }
+                }
+            }
+            // Modify constraints to allow for a range of heroes assigned per active ship (minimum 1, up to 3)
+            model.Add(LinearExpr.Sum(shipAssignments) >= shipActiveVars[ship]); // At least 1 hero if ship is active
+            model.Add(LinearExpr.Sum(shipAssignments) <= 3 * shipActiveVars[ship]); // No more than 3 heroes
+        }
+    }
+
+    private static void AddHeroAssignmentConstraints(CpModel model, Dictionary<string, IntVar> assignments, List<Hero> heroes, List<string> ships, List<string> positions)
+    {
+        foreach (var hero in heroes)
+        {
+            List<IntVar> heroAssignments = new List<IntVar>();
+            foreach (var ship in ships)
+            {
+                foreach (var position in positions)
+                {
+                    string varName = $"{hero.Name}_{ship}_{position}";
+                    if (assignments.ContainsKey(varName))  // Ensure the variable exists before adding it to the list
+                    {
+                        heroAssignments.Add(assignments[varName]);
+                    }
+                }
+            }
+            // Add a constraint that the total number of positions across all ships for each hero is at most 1
+            model.Add(LinearExpr.Sum(heroAssignments) <= 1);
+        }
+    }
+
+    private static List<Hero> SelectSubsetOfHeroes(List<Hero> allHeroes)
+    {
+        // Define the subset of heroes you want to focus on
+        var selectedHeroNames = new List<string> { "Boa", "Griffin", "Molly", "Cursed Ed", "Magnus", "Old Ahab", "Cordelia", "Armstrong", "Bones", "Luna", "Lord Kojo", "Barnacle", "Tanaka", "Lester", "Ophelia", "Qi Lanting", "Sharky" };  
+
+        // Filter the list of heroes to include only the selected ones
+        var heroesToConsider = allHeroes.Where(hero => selectedHeroNames.Contains(hero.Name)).ToList();
+
+        return heroesToConsider;
+    }
+
     private static List<string> SelectSubsetOfShips(List<string> allShips)
     {
         // Define the subset of ships you want to focus on
-        var selectedShips = new List<string> { "Flagship", "Fearless Princess", "Warhammer", "Stormbringer" };  // Example subset
+        var selectedShips = new List<string> { "Flagship", "Fearless Princess", "Warhammer", "Stormbringer", "Black Raven", "Dragon Lance", "Crimson Sentinel" };  
 
         // Filter the list of ships to include only the selected ones
         var shipsToConsider = allShips.Where(ship => selectedShips.Contains(ship)).ToList();
@@ -90,7 +166,10 @@ internal class Program
                 foreach (var position in positions)
                 {
                     var varName = $"{hero.Name}_{ship}_{position}";
-                    assignments[varName] = model.NewBoolVar(varName);
+                    if (!assignments.ContainsKey(varName))
+                    {
+                        assignments[varName] = model.NewBoolVar(varName);
+                    }
                 }
             }
         }
@@ -126,13 +205,17 @@ internal class Program
                     if (hero.PreferredPositions.Contains(position))
                     {
                         var varName = $"{hero.Name}_{ship}_{position}";
-                        // Calculate the preference score for each assignment
-                        int preferenceScore = CalculatePreferenceScore(hero, ship, position);
+                        // Check if the varName key exists in the dictionary before using it
+                        if (assignments.ContainsKey(varName))
+                        {
+                            // Calculate the preference score for each assignment
+                            int preferenceScore = CalculatePreferenceScore(hero, ship, position);
 
-                        // Create an intermediate variable for score contribution, scaled by preference
-                        var scoreContribution = model.NewIntVar(0, preferenceScore, $"scoreContrib_{varName}");
-                        model.Add(scoreContribution == assignments[varName] * preferenceScore);
-                        scoredComponents.Add(scoreContribution);
+                            // Create an intermediate variable for score contribution, scaled by preference
+                            var scoreContribution = model.NewIntVar(0, preferenceScore, $"scoreContrib_{varName}");
+                            model.Add(scoreContribution == assignments[varName] * preferenceScore);
+                            scoredComponents.Add(scoreContribution);
+                        }
                     }
                 }
             }
@@ -143,6 +226,7 @@ internal class Program
 
         return totalScore;
     }
+
 
     // Simplified total score initialization for debugging
     private static IntVar InitializeTotalScoreSimplified(CpModel model, Dictionary<string, IntVar> assignments)
