@@ -6,7 +6,9 @@ internal class Program
 {
     public static void Main(string[] args)
     {
-        var heroes = ReadHeroes("heroes.csv");
+        var heroes = ReadHeroes("Files/heroes.csv");
+        var trinkets = ReadTrinkets("Files/trinkets.csv");
+
         var ships = GetDistinctShips(heroes);
         var positions = new List<string> { "Captain", "First Mate", "Gunner" };
 
@@ -26,12 +28,15 @@ internal class Program
         //var totalScore = InitializeTotalScoreSimplified(model, assignments);
 
         var shipActiveVars = CreateShipActiveVariables(model, ships);
+        var trinketAssignments = CreateTrinketAssignmentVariables(model, heroes, trinkets);
 
         // Add constraints to limit the number of active ships and manage hero assignments per ship
         AddShipAndHeroConstraints(model, assignments, shipActiveVars, ships, positions);
 
         // Ensure each hero is used at most once across all ships and positions
         AddHeroAssignmentConstraints(model, assignments, heroes, ships, positions);
+
+        AddTrinketConstraints(model, trinketAssignments, trinkets);
 
         var totalScore = InitializeTotalScore(model, assignments, heroes, ships, positions);
 
@@ -40,8 +45,43 @@ internal class Program
 
         model.Maximize(totalScore);
 
-        SolveModel(model, assignments);
+        SolveHeroAssigments(model, assignments);
     }
+
+    // iterate over the list of Trinket objects and create variables based on the trinket name and availability.
+    private static Dictionary<string, IntVar> CreateTrinketAssignmentVariables(CpModel model, List<Hero> heroes, List<Trinket> trinkets)
+    {
+        var trinketAssignments = new Dictionary<string, IntVar>();
+
+        foreach (var hero in heroes)
+        {
+            foreach (var trinket in trinkets)
+            {
+                if (trinket.Amount > 0) // Check inventory is available
+                {
+                    string varName = $"{hero.Name}_{trinket.Name}";
+                    trinketAssignments[varName] = model.NewBoolVar(varName);
+                }
+            }
+        }
+
+        return trinketAssignments;
+    }
+
+    // add constraints to ensure that the total number of trinkets assigned does not exceed the available inventory for each trinket
+    private static void AddTrinketConstraints(CpModel model, Dictionary<string, IntVar> trinketAssignments, List<Trinket> trinkets)
+    {
+        foreach (var trinket in trinkets)
+        {
+            var allAssignmentsForTrinket = trinketAssignments.Where(kv => kv.Key.EndsWith($"_{trinket.Name}")).Select(kv => kv.Value).ToList();
+            if (allAssignmentsForTrinket.Any())
+            {
+                model.Add(LinearExpr.Sum(allAssignmentsForTrinket) <= trinket.Amount);
+            }
+        }
+    }
+
+
 
     public static List<Hero> SelectExclusionsForHeroes(List<Hero> heroes)
     {
@@ -283,7 +323,33 @@ internal class Program
         return totalScore;
     }
 
+    /// <summary>
+    ///     Reads trinkets from a CSV file.
+    /// </summary>
+    /// <param name="filePath">The path to the CSV file.</param>
+    /// <returns>A list of trinkets.</returns>
+    private static List<Trinket> ReadTrinkets(string filePath)
+    {
+        var trinkets = new List<Trinket>();
+        using (var reader = new StreamReader(filePath))
+        {
+            while (!reader.EndOfStream)
+            {
+                var line = reader.ReadLine();
+                var values = line.Split(',');
+                if (values.Length < 2) // Ensure there are enough columns
+                {
+                    Console.WriteLine("Warning: Line format incorrect, skipping line.");
+                    continue;
+                }
 
+                var trinket = new Trinket(values[0], Convert.ToInt32(values[1]));
+                trinkets.Add(trinket);
+            }
+        }
+
+        return trinkets;
+    }
 
     /// <summary>
     ///     Reads heroes from a CSV file.
@@ -318,7 +384,8 @@ internal class Program
 
         return heroes;
     }
-    private static void SolveModel(CpModel model, Dictionary<string, IntVar> assignments)
+
+    private static void SolveHeroAssigments(CpModel model, Dictionary<string, IntVar> assignments)
     {
         var solver = new CpSolver();
         var status = solver.Solve(model);

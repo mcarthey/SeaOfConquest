@@ -8,12 +8,18 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Remove="Files\heroes.txt~RF73fa85dd.TMP" />
-    <None Remove="heroes.csv" />
+    <None Remove="Files\ships.csv" />
+    <None Remove="Files\trinkets.csv" />
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="heroes.csv">
+    <Content Include="Files\heroes.csv">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Files\ships.csv">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Files\trinkets.csv">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
