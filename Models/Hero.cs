@@ -6,8 +6,8 @@
 public class Hero
 {
     public string Name { get; set; }
-    public List<string> PreferredPositions { get; set; }
     public List<string> PreferredPartners { get; set; }
+    public List<string> PreferredPositions { get; set; }
     public List<string> PreferredShips { get; set; }
     public List<string> PreferredTrinkets { get; set; }
 
